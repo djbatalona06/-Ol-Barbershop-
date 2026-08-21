@@ -6,6 +6,12 @@
 <title>The Ol' Barbershop — Everett, WA</title>
 <meta name="description" content="The Ol' Barbershop, 1520 112th St SW, Everett WA. A modern day barber shop for the everyday man. See live availability and book with Katherine.">
 <meta name="theme-color" content="#4a1420">
+<!-- Content Security Policy carried in the page itself.
+     GitHub Pages serves its own headers and ignores _headers, _redirects and
+     vercel.json, so the policy has to travel with the HTML or it is simply absent.
+     frame-ancestors is deliberately omitted: the spec ignores it in a meta tag.
+     On Cloudflare Pages the _headers file still applies and adds it back. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'self'; object-src 'none'">
 <meta name="color-scheme" content="light">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

@@ -2,110 +2,139 @@
 
 At your service in Everett, WA.
 
-The whole website is one file: **`index.html`**. There is no build step, no
-framework and no server. Open it, or put it on a host, and it works.
+The whole website is one file, `index.html`. No build step, no framework, no
+server. Open it, or put it on a host, and it works.
 
-- **Live shop data** recovered from public listings and editable in the admin area
-- **Availability calendar** that only shows dates Katherine is actually free
-- **CRM pipeline** shaped like GlossGenius, with CSV import and export
-- **SQL console** for querying the shop records
-- **Two-person admin** for Katherine and DJ, encrypted on the device
-- **Customer accounts** stored in each customer's own browser
-- CCPA privacy tooling, Washington-specific compliance notes, WCAG 2.2 AA
+The public side shows the shop, the price list, and a calendar that only offers
+dates Katherine is actually free. Behind a login there's a client list shaped the
+way GlossGenius shapes one, a pipeline board, and a query box for asking the
+records questions. Katherine and DJ each get their own login, and the records sit
+encrypted on the device. Customers who make an account keep it in their own
+browser rather than on a server somewhere.
+
+It also carries the privacy pages, the Washington compliance notes, and enough
+accessibility work to meet WCAG 2.2 AA.
 
 ---
 
-## Running it on this computer
+## Opening the site on your computer
 
-WebCrypto needs a real web address, so opening the file by double-clicking it
-will not work for the login screens. Serve the folder instead:
+Double-clicking the file won't work right. The login screens need the page to come
+from a real web address, and a file opened off your desktop doesn't have one. So
+run a small web server instead.
+
+Open a terminal in the project folder and type:
 
 ```bash
 cd -Ol-Barbershop-
 python3 -m http.server 8000
 ```
 
-Then open <http://localhost:8000>. Press Ctrl+C in the terminal to stop.
+Then go to <http://localhost:8000> in your browser. When you're done, click back
+into the terminal and press Ctrl+C to stop it.
 
 ---
 
 ## Setting up with Katherine
 
-Do these in order. It takes about twenty minutes.
+Five steps, in order. Give it twenty minutes.
 
-### 1. Create the two admin accounts
+### 1. Make the two accounts
 
-Go to **Shop Admin**. The first time, it asks you to create two accounts:
+Click Shop Admin. The first time, it walks you through creating two logins.
 
-| Account | Who | Can do |
+| Account | Who | What they can do |
 |---|---|---|
-| Owner | Katherine | Everything, including resetting the manager |
-| Manager | DJ | Everything except resetting the owner |
+| Owner | Katherine | Everything, including resetting DJ's login |
+| Manager | DJ | Everything except resetting Katherine's |
 
-Each passphrase needs 12 characters with an upper case letter, a lower case
-letter and a number. **They must be different from each other.**
+Each passphrase needs 12 characters or more, with a capital letter, a small
+letter and a number. The two have to be different from each other.
 
-There is no "forgot my passphrase" link. There is no server holding an account
-to reset. The next screen shows a **recovery code**, once. Print it or write it
-down and keep it in the shop. If both passphrases are lost and the code is gone,
-the records cannot be opened by anyone.
+There's no "forgot my passphrase" link, because there's no company holding the
+account to reset it. Once both logins exist, the site shows a recovery code one
+time only. Print it or write it on paper and leave it somewhere in the shop. If
+both passphrases and that code are gone, nobody can open the records again.
 
-### 2. Set the real prices
+### 2. Put in the real prices
 
-The Services tab lists every service with a **confirm** flag. Those prices came
-from public listings, not from Katherine, so the public menu shows the word
-"ask" instead of a number until she sets it. Typing a real price clears the flag.
+Open the Services tab. Every price has a "confirm" tag on it, because those
+numbers came off public listings rather than from Katherine. Until she types a
+real one, the menu on the website shows the word "ask" instead of a number.
+Typing a price clears the tag.
 
-This is deliberate. Showing a price the shop will not honour is a deceptive
-practice under Washington's Consumer Protection Act.
+That's on purpose. In Washington, advertising a price you won't honour counts as
+a deceptive practice, so the site says nothing rather than the wrong thing.
 
 ### 3. Check the hours
 
-The Schedule tab is seeded with closed Sunday and Monday, 10 to 4 on Tuesday and
-Saturday, 10 to 6 Wednesday through Friday. Fix anything that is wrong. Whatever
-is saved here is exactly what customers can book.
+The Schedule tab starts out closed Sunday and Monday, 10 to 4 on Tuesday and
+Saturday, 10 to 6 Wednesday through Friday. Fix whatever's wrong. What's saved
+here is exactly what customers can book, so read it twice.
 
-Add days off, holidays and short days under **Days off and changes**. That beats
-editing the weekly hours for a one-off.
+For one day off, a holiday, or an early close, use "Days off and changes" further
+down the page instead of editing the weekly hours.
 
-### 4. Bring the clients across
+### 4. Move her clients over
 
-In GlossGenius, export clients to CSV. In the **Import / Export** tab, drop the
-file in. The screen matches the columns for you, then shows a preview of what
-would be added, updated and skipped. **Nothing is saved until the preview is
-approved.**
+In GlossGenius, export the client list as a spreadsheet file. The button says CSV.
+Back on the site, open Import / Export and drop that file in.
+
+The screen works out which column is which, then shows you a preview: who's new,
+who already exists, and which rows it skipped and why. Read it before you agree.
+Nothing gets written until you click the import button.
 
 ### 5. Take a backup
 
-Same tab, **Full backup as JSON**. Do this after setup and every few weeks.
-It restores everything, so it is the one habit worth keeping.
+Same tab, the button marked "Full backup as JSON". Do it once setup is done, then
+every few weeks. It puts everything back exactly as it was.
 
 ---
 
 ## Putting it online
 
-The site is plain static files, so any static host works. Two free options:
+The repo already has a GitHub Pages workflow (`.github/workflows/static.yml`). Every
+push to `main` publishes the site. Nothing else to set up, and no build step to
+configure.
 
-### Cloudflare Pages (recommended)
+Two things about Pages worth knowing, because they are not obvious.
 
-Cloudflare's free tier allows commercial use, which matters here.
+**The header files do nothing there.** `_headers`, `_redirects` and `vercel.json` are
+conventions belonging to Cloudflare and Vercel. GitHub Pages ignores all three and
+serves its own headers instead. The redirects were never load-bearing, since the site
+routes with `#/privacy` style links that work anywhere. The security policy did
+matter, so it now travels inside `index.html` as a `<meta http-equiv>` tag and applies
+on any host. One piece cannot survive that move: `frame-ancestors`, which browsers
+ignore in a meta tag. On Cloudflare the `_headers` file still adds it back.
 
-1. Sign in at <https://dash.cloudflare.com> and go to Workers & Pages
-2. Create → Pages → Connect to Git, and pick this repository
-3. Framework preset **None**, build command **empty**, output directory `/`
+**Read GitHub's rules before you rely on it.** GitHub Pages is not allowed to run "your
+online business, e-commerce site, or any other website that is primarily directed at
+either facilitating commercial transactions." This site takes no money. There is no
+cart, no checkout, no card field, and booking hands off to GlossGenius. That reads as a
+shop's brochure page rather than a store, so it should be fine. It is still a judgment
+call, and if it ever grows a payment button that judgment changes.
+
+GitHub also says not to use Pages for sending passwords. Worth being precise: no
+password on this site is ever sent anywhere. The login screens hash the passphrase in
+the browser and compare it there. Nothing leaves the device, so there is no transmission
+to protect.
+
+Free Pages also needs the repository public, which means anyone can read `index.html`.
+That was already true of the design and is covered under "What this does not do" below.
+
+### If you want to move off GitHub Pages
+
+Cloudflare Pages is the alternative with no ambiguity in its terms, and it honours the
+`_headers` file so the full security policy applies.
+
+1. Sign in at <https://dash.cloudflare.com> and open Workers & Pages
+2. Create, then Pages, then Connect to Git, and pick this repository
+3. Framework preset: None. Build command: leave empty. Output directory: /
 4. Save and Deploy
 
-`_headers` and `_redirects` are picked up automatically.
-
-### Vercel
-
-**Check this first:** Vercel's free Hobby plan is for non-commercial personal
-projects only. A barbershop taking bookings is commercial use, and the penalty is
-account suspension. Either use Cloudflare Pages, or pay for Vercel Pro.
-
-If you are on Pro: import the repository, framework preset **Other**, build
-command empty, output directory the repository root. `vercel.json` handles the
-rest.
+Avoid Vercel's free Hobby plan. It bans commercial use outright, with no carve out for
+brochure sites, and they suspend accounts over it. Vercel Pro is fine, and `vercel.json`
+is already written for it.
 
 ---
 
@@ -150,7 +179,8 @@ backend, which `sql/schema.sql` is written to support without a redesign.
 ## Files
 
 ```
-index.html        the entire application
+index.html        the entire application, security policy included in its head
+.github/workflows/static.yml   publishes to GitHub Pages on every push to main
 vercel.json       Vercel routing and security headers
 _headers          the same headers for Cloudflare Pages
 _redirects        Cloudflare Pages clean URLs
