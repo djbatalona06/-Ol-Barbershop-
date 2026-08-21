@@ -1,0 +1,9 @@
+# Cloudflare Pages clean-URL routing. Serves the single-page app for every named route.
+/book           /index.html   200
+/services       /index.html   200
+/account        /index.html   200
+/admin          /index.html   200
+/privacy        /index.html   200
+/terms          /index.html   200
+/accessibility  /index.html   200
+/do-not-sell    /index.html   200
