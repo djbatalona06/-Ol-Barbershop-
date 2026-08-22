@@ -11,7 +11,7 @@
      vercel.json, so the policy has to travel with the HTML or it is simply absent.
      frame-ancestors is deliberately omitted: the spec ignores it in a meta tag.
      On Cloudflare Pages the _headers file still applies and adds it back. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'self'; object-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client https://js.stripe.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; connect-src 'self' https://accounts.google.com/gsi/ https://api.stripe.com; frame-src https://accounts.google.com/gsi/ https://js.stripe.com https://hooks.stripe.com; form-action 'self'; base-uri 'self'; object-src 'none'">
 <meta name="color-scheme" content="light">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -447,6 +447,20 @@ textarea.input { min-height: 6rem; resize: vertical; line-height: 1.55; }
               background var(--d-micro) var(--ease-out-quart);
 }
 .slot-quick:hover { border-color: var(--claret); background: oklch(0.930 0.030 24); }
+
+/* ---- provider sign-in ----------------------------------------------------
+   Google renders its own button and will not be restyled, so the job here is to
+   give it room and to make the divider below it read as a genuine second option
+   rather than an afterthought. */
+.gsign { display: grid; gap: var(--s-3); margin-bottom: var(--s-5); }
+.gsign > div:first-child { display: flex; justify-content: center; }
+.or {
+  display: flex; align-items: center; gap: var(--s-3);
+  font-size: var(--t-xs); color: var(--ink-faint);
+}
+.or::before, .or::after {
+  content: ''; flex: 1; border-top: var(--rule);
+}
 
 /* ---- directions: two plain links, no embedded map ------------------------
    An embedded Maps iframe would need a widened CSP and would set a Google cookie
@@ -1083,7 +1097,9 @@ body.has-disclose { padding-bottom: var(--disclose-h, 8rem); }
   <div class="disclose-inner">
     <p>
       This site stores your appointments and preferences in your own browser using local
-      storage. Nothing is sent to an advertising network and nothing is sold.
+      storage. If you sign in with Google, your name, email and requests are also kept on
+      the shop's server so your account works on your other devices. Nothing is sent to an
+      advertising network and nothing is sold.
       Read the <a href="#/privacy" data-nav>Privacy Policy</a>.
     </p>
     <button class="btn btn-brass" id="discloseOk">Got it</button>
@@ -2641,8 +2657,11 @@ function renderHandoff(view, req, svc, kat) {
     <div class="panel-head"><h3>Send it to Katherine</h3><span class="chip chip-warn">Not booked yet</span></div>
     <div class="note note-warn">
       <b>One more step</b>
-      Your request is saved on this device but the shop has not received it yet.
-      Use one of these to send it. Katherine replies to confirm.
+      ${cloudMe
+        ? `Your request is saved but the shop has not received it yet. Send it and
+           Katherine replies to confirm. It is not an appointment until she does.`
+        : `Your request is saved on this device but the shop has not received it yet.
+           Use one of these to send it. Katherine replies to confirm.`}
     </div>
     <div class="kv" style="margin-top:var(--s-4)">
       <div class="kv-row"><span class="kv-k">Service</span><span class="kv-v">${esc(svc.name)}</span></div>
@@ -2651,7 +2670,8 @@ function renderHandoff(view, req, svc, kat) {
       <div class="kv-row"><span class="kv-k">Length</span><span class="kv-v">${esc(svc.duration_min)} min</span></div>
     </div>
     <div style="margin-top:var(--s-5);display:flex;gap:var(--s-3);flex-wrap:wrap">
-      <a class="btn" href="${esc(sms)}">Text the shop</a>
+      ${cloudMe ? `<button class="btn" id="sendNow">Send it to the shop</button>` : ''}
+      <a class="btn${cloudMe ? ' btn-ghost' : ''}" href="${esc(sms)}">Text the shop</a>
       <a class="btn btn-ghost" href="${esc(mail)}">Email instead</a>
       <a class="btn btn-ghost" href="tel:+1${esc(SHOP.phone)}">Call</a>
       <a class="btn btn-brass" href="${esc(SHOP.booking_url)}" target="_blank" rel="noopener noreferrer">
@@ -2662,13 +2682,150 @@ function renderHandoff(view, req, svc, kat) {
       You are leaving this site when you follow that link.
     </p>
   </div>`;
+
+  const send = $('#sendNow', view);
+  if (!send) return;
+  send.addEventListener('click', async () => {
+    send.disabled = true;
+    try {
+      await api('/api/requests', { method: 'POST', body: {
+        name: `${req.first_name} ${req.last_name}`.trim(),
+        phone: req.phone, email: req.email,
+        service_id: svc.id, service_name: svc.name,
+        date: req.starts_at.slice(0, 10), time: req.starts_at.slice(11, 16),
+        note: req.notes
+      }});
+      // Still a request. The chip stays honest about that.
+      $('.chip-warn', $('#handoff', view)).textContent = 'Sent, not booked';
+      send.textContent = 'Sent to the shop';
+      toast('Sent. Katherine confirms from her end.', 'ok');
+    } catch (e) {
+      send.disabled = false;
+      toast(e.message, 'danger');
+    }
+  });
 }
 
 /* ============================================================================
-   CUSTOMER ACCOUNTS
+   SERVER SESSION
+   Everything in this section is optional. The site is still a single file that
+   works with nothing behind it: if the routes under /api are not there — opened
+   off a plain static host, or off the file system — every probe fails quietly and
+   the page falls back to the on-device accounts below.
+
+   What the server buys is the one thing a device cannot: an account that follows
+   you to your other phone. A sign-in that only works in the browser you created it
+   in is not really a sign-in, and asking a man in a truck to invent a thirteenth
+   passphrase is why he books by phone instead.
+
+   Note what does NOT move here. Katherine's book, her clients and her notes stay
+   encrypted on her device exactly as before. Only customer identities and the
+   requests they send live on the server, because those are the parts that have to
+   cross a device boundary to be worth anything.
+   ========================================================================= */
+let cloudMe = null;        // { id, email, name, provider } when signed in
+let cloudProbe = null;     // cached { available, clientId, nonce }
+
+async function api(path, { method = 'GET', body, token } = {}) {
+  const res = await fetch(path, {
+    method,
+    credentials: 'same-origin',
+    headers: {
+      ...(body ? { 'content-type': 'application/json' } : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {})
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  let data = null;
+  try { data = await res.json(); } catch { /* empty or not JSON; res.ok still decides */ }
+  if (!res.ok) throw new Error((data && data.error) || `That did not go through (${res.status}).`);
+  return data;
+}
+
+/** One probe per page load. Tells us whether a server is there and configured. */
+async function cloudCapabilities() {
+  if (cloudProbe) return cloudProbe;
+  try {
+    const data = await api('/api/auth/nonce');
+    cloudProbe = { available: Boolean(data.clientId), clientId: data.clientId, nonce: data.nonce };
+  } catch {
+    cloudProbe = { available: false, clientId: '', nonce: '' };
+  }
+  return cloudProbe;
+}
+
+/** Ask the server who we are. The cookie is the only proof, so it is the only thing asked. */
+async function cloudRefresh() {
+  try {
+    const data = await api('/api/auth/session');
+    cloudMe = data.customer || null;
+  } catch { cloudMe = null; }
+  return cloudMe;
+}
+
+async function cloudSignOut() {
+  try { await api('/api/auth/session', { method: 'DELETE' }); } catch { /* the cookie expires regardless */ }
+  cloudMe = null;
+}
+
+/* Google's script is fetched only once we know a client id exists, so a site with
+   no billing and no Google project never talks to Google at all. */
+let gsiLoading = null;
+function loadGsi() {
+  if (window.google && window.google.accounts) return Promise.resolve();
+  if (gsiLoading) return gsiLoading;
+  gsiLoading = new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = 'https://accounts.google.com/gsi/client';
+    el.async = true; el.defer = true;
+    el.onload = resolve;
+    el.onerror = () => reject(new Error('Google sign-in did not load.'));
+    document.head.appendChild(el);
+  });
+  return gsiLoading;
+}
+
+/**
+ * Put a real Google button in `host`. Resolves to false when there is nothing to
+ * mount, so callers can hide their surrounding markup rather than show a dead box.
+ */
+async function mountGoogleButton(host, onDone) {
+  const caps = await cloudCapabilities();
+  if (!caps.available) return false;
+
+  try { await loadGsi(); } catch { return false; }
+
+  window.google.accounts.id.initialize({
+    client_id: caps.clientId,
+    // The nonce comes back inside the signed token, and the server compares the two.
+    // Without it a token minted for another page could be replayed against this one.
+    nonce: caps.nonce,
+    callback: async ({ credential }) => {
+      try {
+        const data = await api('/api/auth/google', { method: 'POST', body: { credential } });
+        cloudMe = data.customer;
+        toast(`Signed in as ${cloudMe.name || cloudMe.email}.`, 'ok');
+        if (onDone) onDone(); else render();
+      } catch (e) {
+        toast(e.message, 'danger');
+      }
+    }
+  });
+
+  window.google.accounts.id.renderButton(host, {
+    theme: 'outline', size: 'large', shape: 'rectangular',
+    text: 'continue_with', logo_alignment: 'left', width: 320
+  });
+  return true;
+}
+
+/* ============================================================================
+   CUSTOMER ACCOUNTS, ON THIS DEVICE
    Encrypted with the customer's own passphrase and never leaving their device.
-   There is no central customer store on this site, which is the whole point:
-   a static host cannot protect one.
+   This is still the right answer for anyone who does not want an account anywhere,
+   and it is the only answer when the site is served from a host with no functions.
+   The provider sign-in above is the other option, not a replacement: accounts made
+   here keep working exactly as they did.
    ========================================================================= */
 let meKey = null;   // CryptoKey while signed in
 let meData = null;  // { profile, requests[], prefs }
@@ -2733,7 +2890,18 @@ async function meSignIn(keyInput, pass) {
 }
 function meSignOut() { meKey = null; meData = null; sessionStorage.removeItem('olb.me'); }
 
+/* /billing is a bookmark for Katherine, and the address Stripe returns her to.
+   It is the admin billing tab behind the same lock as everything else in admin. */
+route('/billing', view => {
+  adminTab = 'billing';
+  if (new URLSearchParams(location.search).get('started')) {
+    toast('Thanks. Stripe confirms in a moment.', 'ok');
+  }
+  location.hash = '#/admin';
+});
+
 route('/account', view => {
+  if (cloudMe) return renderCloudDash(view);
   if (!cryptoReady()) return cryptoWarning(view);
   if (meData) return renderMeDash(view);
 
@@ -2744,9 +2912,19 @@ route('/account', view => {
         ${poleHtml('pole-lg')}
         <h2>Your chair, remembered.</h2>
         <p>Keep your usual cut, your history and your next appointment in one place.
-           It all stays in this browser on this device.</p>
+           Sign in with Google and it follows you to your other devices; use a passphrase
+           and it stays in this browser on this device.</p>
       </div>
       <div class="panel">
+        <!-- Hidden until the probe says a server is actually there. Nothing is worse
+             than a sign-in button that does nothing on a host without the routes. -->
+        <div id="gWrap" class="gsign" hidden>
+          <div id="gBtn"></div>
+          <p class="hint">Signs you in on any device, so your history follows you.
+             Google tells the shop your name and email address, nothing else.</p>
+          <div class="or"><span>or use a passphrase on this device</span></div>
+        </div>
+
         <div class="tabs" role="tablist">
           <button role="tab" aria-selected="true"  id="tabIn" aria-controls="paneIn">Sign in</button>
           <button role="tab" aria-selected="false" id="tabUp" aria-controls="paneUp">Create account</button>
@@ -2797,6 +2975,10 @@ route('/account', view => {
     </div>
   </section>`;
 
+  mountGoogleButton($('#gBtn', view)).then(ok => {
+    if (ok) $('#gWrap', view).hidden = false;
+  });
+
   const tabIn = $('#tabIn', view), tabUp = $('#tabUp', view);
   const paneIn = $('#paneIn', view), paneUp = $('#paneUp', view);
   const pick = up => {
@@ -2834,6 +3016,77 @@ route('/account', view => {
     } catch (e) { err.textContent = e.message; err.hidden = false; }
   });
 });
+
+/* The dashboard for a customer signed in through a provider. Deliberately thinner
+   than the on-device one: this account holds what he sent the shop, and nothing
+   the shop knows about him. Her book is hers and stays on her iPad. */
+function renderCloudDash(view) {
+  view.innerHTML = `
+  <section class="section wrap">
+    <div class="panel">
+      <div class="panel-head">
+        <h3>${esc(cloudMe.name || 'Your account')}</h3>
+        <span class="chip chip-ok">Signed in with Google</span>
+      </div>
+      <div class="kv">
+        <div class="kv-row"><span class="kv-k">Email</span><span class="kv-v">${esc(cloudMe.email)}</span></div>
+      </div>
+      <p class="hint" style="margin-top:var(--s-3)">
+        This account works on any device you sign in from. The shop stores your name,
+        your email address and the requests you send. Nothing else.
+      </p>
+      <hr class="brass-rule" style="margin-block:var(--s-5)">
+      <div class="panel-head"><h3>Your requests</h3></div>
+      <div id="cloudReqs"><p class="hint">Loading.</p></div>
+      <div style="margin-top:var(--s-5);display:flex;gap:var(--s-3);flex-wrap:wrap">
+        <a class="btn" href="#/book" data-nav>Ask for a time</a>
+        <button class="btn btn-ghost" id="cloudOut">Sign out</button>
+        <button class="btn btn-ghost btn-sm" id="cloudDel">Delete my account</button>
+      </div>
+      <p class="hint" style="margin-top:var(--s-3)">Deleting removes your account and every
+        request you sent, straight away and for good. Appointments the shop has already
+        written into its book stay in its book as a business record.</p>
+    </div>
+  </section>`;
+
+  $('#cloudOut', view).addEventListener('click', async () => {
+    await cloudSignOut();
+    toast('Signed out.');
+    render();
+  });
+
+  // Irreversible, so it asks. The rest of the site uses inline confirmation, but
+  // DESIGN.md keeps modals for exactly this case.
+  $('#cloudDel', view).addEventListener('click', async () => {
+    if (!confirm('Delete your account and every request you have sent? This cannot be undone.')) return;
+    try {
+      await api('/api/account', { method: 'DELETE' });
+      cloudMe = null;
+      toast('Your account has been deleted.', 'ok');
+      render();
+    } catch (e) { toast(e.message, 'danger'); }
+  });
+
+  const box = $('#cloudReqs', view);
+  api('/api/requests').then(data => {
+    const rows = data.requests || [];
+    if (!rows.length) {
+      box.innerHTML = `<p class="hint">Nothing yet. When you ask for a time it shows up here.</p>`;
+      return;
+    }
+    box.innerHTML = `<div class="kv">` + rows.map(r => `
+      <div class="kv-row">
+        <span class="kv-k">${esc(prettyDate(r.requested_date))} at ${esc(hm12(r.requested_time))}</span>
+        <span class="kv-v">${esc(r.service_name)}
+          <span class="chip ${r.status === 'pulled' ? 'chip-ok' : 'chip-warn'}"
+            >${r.status === 'pulled' ? 'Katherine has it' : 'Waiting'}</span></span>
+      </div>`).join('') + `</div>
+      <p class="hint" style="margin-top:var(--s-3)">A request is not an appointment
+        until Katherine confirms it with you.</p>`;
+  }).catch(() => {
+    box.innerHTML = `<p class="hint">Could not load your requests just now.</p>`;
+  });
+}
 
 function cryptoWarning(view) {
   view.innerHTML = `<section class="section wrap-tight">
@@ -3204,10 +3457,21 @@ function renderAdminLogin(view) {
 
 /* ---------- admin shell --------------------------------------------------- */
 const ADMIN_TABS = [
-  ['today', 'Today'], ['schedule', 'Schedule'], ['services', 'Services'],
+  ['today', 'Today'], ['requests', 'Requests'], ['schedule', 'Schedule'], ['services', 'Services'],
   ['clients', 'Clients'], ['pipeline', 'Pipeline'], ['sql', 'SQL'],
-  ['data', 'Import / Export'], ['legal', 'Compliance']
+  ['data', 'Import / Export'], ['legal', 'Compliance'], ['billing', 'Billing']
 ];
+
+/* Settings live inside the encrypted vault rather than in plain localStorage,
+   because the pull token below is a credential. vaultDB is serialised whole, so a
+   plain property persists without needing a table. */
+function vaultSetting(key, value) {
+  if (!vaultDB) return '';
+  if (!vaultDB.settings) vaultDB.settings = {};
+  if (value === undefined) return vaultDB.settings[key] || '';
+  vaultDB.settings[key] = value;
+  return value;
+}
 
 function renderAdminShell(view) {
   const tbd = publicDB.services.filter(s => s.active && s.needs_review).length;
@@ -3246,8 +3510,9 @@ function renderAdminShell(view) {
 
 function paintAdminPane(view) {
   const pane = $('#admPane', view);
-  ({ today: paneToday, schedule: paneSchedule, services: paneServices, clients: paneClients,
-     pipeline: panePipeline, sql: paneSql, data: paneData, legal: paneLegal }[adminTab] || paneToday)(pane, view);
+  ({ today: paneToday, requests: paneRequests, schedule: paneSchedule, services: paneServices,
+     clients: paneClients, pipeline: panePipeline, sql: paneSql, data: paneData,
+     legal: paneLegal, billing: paneBilling }[adminTab] || paneToday)(pane, view);
 }
 
 /* ---------- Today: an agenda, not a row of big numbers -------------------- */
@@ -3431,6 +3696,211 @@ function openApptForm(pane, view, existing) {
     await saveVault();
     toast('Appointment saved.', 'ok');
     paintAdminPane(view);
+  });
+}
+
+/* ---------- Requests: the inbox from the website --------------------------
+   Requests customers send while signed in wait on the server until Katherine
+   pulls them in here. Pulling copies them into her book, which stays the system
+   of record; the server row is then marked so the same request cannot be added
+   twice. Nothing is written to her book without her pressing the button.
+   ------------------------------------------------------------------------- */
+let pendingRequests = null;
+
+function paneRequests(pane, view) {
+  const token = vaultSetting('pull_token');
+
+  pane.innerHTML = `
+  <div class="panel">
+    <div class="panel-head"><h3>Requests from the website</h3>
+      ${pendingRequests ? `<span class="chip ${pendingRequests.length ? 'chip-warn' : 'chip-plain'}"
+        >${esc(pendingRequests.length)} waiting</span>` : ''}</div>
+    <div class="note" style="margin-bottom:var(--s-5)">
+      <b>These are requests, not appointments</b>
+      Adding one puts it in your book as requested. It is confirmed when you tell
+      the customer it is, the same as a phone call.
+    </div>
+
+    <div class="field">
+      <label for="pullTok">Pull code</label>
+      <input class="input" id="pullTok" type="password" autocomplete="off"
+        value="${esc(token)}" placeholder="Paste the code DJ gave you">
+      <p class="hint">Set once. It is kept inside your encrypted records, not in the
+        page, and it is what lets this iPad ask the website for waiting requests.</p>
+    </div>
+    <div style="display:flex;gap:var(--s-3);flex-wrap:wrap;margin-top:var(--s-4)">
+      <button class="btn" id="pullGo">Check for requests</button>
+      <button class="btn btn-ghost btn-sm" id="pullSave">Save code</button>
+    </div>
+    <p class="err" id="pullErr" hidden style="margin-top:var(--s-3)"></p>
+    <div id="pullList" style="margin-top:var(--s-5)"></div>
+  </div>`;
+
+  const err = $('#pullErr', pane);
+  const say = m => { err.textContent = m; err.hidden = false; };
+
+  $('#pullSave', pane).addEventListener('click', async () => {
+    vaultSetting('pull_token', $('#pullTok', pane).value.trim());
+    await saveVault();
+    toast('Pull code saved.', 'ok');
+  });
+
+  $('#pullGo', pane).addEventListener('click', async () => {
+    err.hidden = true;
+    const tok = $('#pullTok', pane).value.trim();
+    if (!tok) return say('Paste the pull code first.');
+    if (tok !== vaultSetting('pull_token')) { vaultSetting('pull_token', tok); await saveVault(); }
+    try {
+      const data = await api('/api/requests', { token: tok });
+      pendingRequests = data.requests || [];
+      paintAdminPane(view);
+    } catch (e) {
+      say(e.message + ' If this site is not on a host that runs the booking service, this stays empty.');
+    }
+  });
+
+  const list = $('#pullList', pane);
+  if (!pendingRequests) return;
+  if (!pendingRequests.length) {
+    list.innerHTML = `<p class="hint">Nothing waiting.</p>`;
+    return;
+  }
+
+  list.innerHTML = `<div class="table-wrap"><table class="table">
+    <thead><tr><th>When</th><th>Who</th><th>Service</th><th>Note</th><th></th></tr></thead>
+    <tbody>${pendingRequests.map(r => `<tr>
+      <td>${esc(prettyDate(r.requested_date))}<br><span class="kv-k">${esc(hm12(r.requested_time))}</span></td>
+      <td>${esc(r.name || '')}<br><span class="kv-k">${esc(fmtPhone(r.phone || ''))}</span></td>
+      <td>${esc(r.service_name)}</td>
+      <td>${esc(r.note || '')}</td>
+      <td class="num"><button class="btn btn-sm" data-add="${esc(r.id)}">Add to the book</button></td>
+    </tr>`).join('')}</tbody></table></div>`;
+
+  $$('[data-add]', list).forEach(b => b.addEventListener('click', async () => {
+    const req = pendingRequests.find(r => r.id === b.dataset.add);
+    if (!req) return;
+    b.disabled = true;
+    try {
+      await importRequest(req);
+      await api('/api/requests', { method: 'PATCH', token: vaultSetting('pull_token'),
+                                   body: { ids: [req.id] } });
+      pendingRequests = pendingRequests.filter(r => r.id !== req.id);
+      toast('Added to the book as requested.', 'ok');
+      paintAdminPane(view);
+    } catch (e) {
+      b.disabled = false;
+      say(e.message);
+    }
+  }));
+}
+
+/** Copy one request into the book, reusing the client if the number is already known. */
+async function importRequest(req) {
+  const staffId = (publicDB.staff.find(s => s.active) || {}).id;
+  const svc = publicDB.services.find(x => x.id === req.service_id)
+           || publicDB.services.find(x => x.name === req.service_name)
+           || defaultService();
+
+  const startMin = hmToMin(req.requested_time);
+  const endMin = startMin + Number(svc.duration_min);
+  if (busyFor(staffId, req.requested_date).some(b => startMin < b.e && endMin > b.s)) {
+    throw new Error('That time now overlaps something already in the book. Call them back instead.');
+  }
+
+  const phone = normPhone(req.phone || '');
+  const [first, ...rest] = String(req.name || '').split(/\s+/);
+  let client = phone ? vaultDB.clients.find(c => normPhone(c.phone) === phone) : null;
+  if (!client) {
+    client = { id: uid(), first_name: first || 'Customer', last_name: rest.join(' '),
+               phone, email: req.email || '', birthday: '', client_since: todayYmd(),
+               source: 'web', tags: '', notes: '', sms_opt_in: 0, email_opt_in: 0,
+               total_visits: 0, lifetime_value_cents: 0, last_visit_at: '', created_at: nowIso() };
+    vaultDB.clients.push(client);
+  }
+
+  const appt = {
+    id: uid(), client_id: client.id, staff_id: staffId, service_id: svc.id,
+    starts_at: stamp(req.requested_date, req.requested_time),
+    ends_at: stamp(req.requested_date, minToHm(endMin)),
+    status: 'requested', price_cents: Number(svc.price_cents || 0),
+    deposit_paid_cents: 0, source: 'web', notes: req.note || '', created_at: nowIso()
+  };
+  vaultDB.appointments.push(appt);
+  advanceCard(appt);
+  syncBusyBlock(appt);
+  audit('create', 'appointment', appt.id, `From the website: ${client.first_name} ${req.requested_date}`);
+  await saveVault();
+}
+
+/* ---------- Billing: what the shop pays for the website -------------------
+   This is the shop's subscription for the site itself. It has nothing to do with
+   haircuts, which GlossGenius takes payment for; a second card processor would
+   split her payouts and leave her two sets of books at tax time.
+
+   Nothing here can switch the website off. A late invoice changes the badge on
+   this page and does nothing else, which is the promise made when she bought it.
+   ------------------------------------------------------------------------- */
+let billingState = null;
+
+function paneBilling(pane, view) {
+  const token = vaultSetting('pull_token');
+  const st = billingState;
+  const label = { active: ['chip-ok', 'Paid up'], trialing: ['chip-ok', 'Trial'],
+                  past_due: ['chip-warn', 'Payment did not go through'],
+                  canceled: ['chip-plain', 'Cancelled'],
+                  none: ['chip-plain', 'Not set up yet'] }[st ? (st.status || 'none') : 'none']
+                || ['chip-plain', st.status];
+
+  pane.innerHTML = `
+  <div class="panel">
+    <div class="panel-head"><h3>The website plan</h3>
+      ${st ? `<span class="chip ${esc(label[0])}">${esc(label[1])}</span>` : ''}</div>
+
+    <div class="kv">
+      <div class="kv-row"><span class="kv-k">To set it up</span><span class="kv-v">$100 once</span></div>
+      <div class="kv-row"><span class="kv-k">To keep it running</span><span class="kv-v">$50 a month</span></div>
+      <div class="kv-row"><span class="kv-k">Included each month</span>
+        <span class="kv-v">Hosting, the domain, backups, and an hour of changes</span></div>
+      ${st && st.current_period_end ? `<div class="kv-row"><span class="kv-k">Paid through</span>
+        <span class="kv-v">${esc(prettyDate(String(st.current_period_end).slice(0, 10)))}</span></div>` : ''}
+    </div>
+
+    <div class="note" style="margin-top:var(--s-5)">
+      <b>Your website stays up either way</b>
+      If a payment fails, this page says so and nothing else happens. The site does not
+      go dark over a late invoice, and your records are yours whatever happens.
+    </div>
+
+    <div style="display:flex;gap:var(--s-3);flex-wrap:wrap;margin-top:var(--s-5)">
+      <button class="btn btn-ghost btn-sm" id="billCheck">Check the plan</button>
+      <button class="btn" id="billStart">${st && st.status === 'active' ? 'Change card' : 'Set up billing'}</button>
+    </div>
+    <p class="hint" style="margin-top:var(--s-3)">Card details are entered on Stripe's own
+      page, never on this one. Nothing about your card ever touches this website.</p>
+    <p class="err" id="billErr" hidden style="margin-top:var(--s-3)"></p>
+  </div>`;
+
+  const err = $('#billErr', pane);
+  const say = m => { err.textContent = m; err.hidden = false; };
+
+  $('#billCheck', pane).addEventListener('click', async () => {
+    err.hidden = true;
+    if (!token) return say('Set the pull code on the Requests tab first.');
+    try {
+      const data = await api('/api/billing/checkout', { token });
+      billingState = data.billing;
+      paintAdminPane(view);
+    } catch (e) { say(e.message); }
+  });
+
+  $('#billStart', pane).addEventListener('click', async ev => {
+    err.hidden = true;
+    if (!token) return say('Set the pull code on the Requests tab first.');
+    ev.currentTarget.disabled = true;
+    try {
+      const data = await api('/api/billing/checkout', { method: 'POST', token });
+      window.location.href = data.url;
+    } catch (e) { ev.currentTarget.disabled = false; say(e.message); }
   });
 }
 
@@ -4350,19 +4820,40 @@ route('/privacy', () => legalShell('Privacy Policy', 'Legal', `
      Phone ${esc(fmtPhone(SHOP.phone))}. Email ${esc(SHOP.email)}.</p>
 
   ${H('What this website stores, and where')}
-  <p>This site has no server behind it. Your account, your appointment requests and your
-     preferences are stored by your own web browser on the device you are using, in an area
-     called local storage. That information does not travel to us, to an advertising
-     network, or to anyone else. Clearing your browser data removes it.</p>
-  <p>Booking a chair sends your request to the shop through your own text message app,
-     email app, or telephone, or through GlossGenius if you choose that link. Those services
-     handle the message under their own privacy policies.</p>
+  <p>Where your information lives depends on how you use the site, so this section splits
+     it in two. Neither path involves advertising, analytics, or tracking of any kind:
+     nothing on this site follows you anywhere.</p>
+
+  <p><b>If you use the site without signing in, or you make an account with a passphrase.</b>
+     Your account, your appointment requests and your preferences are stored by your own web
+     browser on the device you are using, in an area called local storage. That information
+     does not travel to us or to anyone else. Clearing your browser data removes it.
+     Booking a chair sends your request to the shop through your own text message app, email
+     app, or telephone, or through GlossGenius if you choose that link. Those services handle
+     the message under their own privacy policies.</p>
+
+  <p><b>If you sign in with Google.</b> Signing in that way needs a server, because an
+     account that only works in one browser is not really an account. Google tells us three
+     things: an account identifier, your name, and your email address. It does not tell us
+     your password, and we never see it. We store those three things, plus the appointment
+     requests you send while signed in, so that your history follows you to your other
+     devices.</p>
+
+  <p>Two companies handle that information for us, under contract and only on our
+     instructions. <b>Cloudflare</b> runs the site and the database it sits in.
+     <b>Google</b> checks who you are when you sign in. Neither is permitted to use your
+     information for their own purposes.</p>
+
+  <p>You can delete a Google sign-in account, and everything attached to it, from the
+     <a href="#/account" data-nav>account page</a> or by asking us. Deleting it removes the
+     requests too.</p>
 
   ${H('Categories of personal information collected in the last 12 months')}
   <div class="table-scroll"><table class="data">
     <thead><tr><th>Category</th><th>Examples</th><th>Collected</th><th>Sold or shared</th><th>Business purpose</th></tr></thead>
     <tbody>
       <tr><td>Identifiers</td><td>Name, mobile number, email</td><td>Yes</td><td>No</td><td>Booking and contacting you</td></tr>
+      <tr><td>Sign-in identifiers</td><td>Google account id, verified email</td><td>Only if you sign in with Google</td><td>No</td><td>Recognising you on your other devices</td></tr>
       <tr><td>Customer records</td><td>Appointment and service history</td><td>Yes</td><td>No</td><td>Service history and rebooking</td></tr>
       <tr><td>Commercial information</td><td>Services purchased, amounts</td><td>Yes</td><td>No</td><td>Shop records and accounting</td></tr>
       <tr><td>Internet activity</td><td>Pages viewed on this site</td><td>No</td><td>No</td><td>Not collected. No analytics or tracking runs here.</td></tr>
@@ -4410,8 +4901,10 @@ route('/privacy', () => legalShell('Privacy Policy', 'Legal', `
   ${H('Washington My Health My Data Act')}
   <p>The shop does not want and does not knowingly collect consumer health data. Notes
      fields on this site ask you not to enter health or medical details, and staff are
-     instructed to record only how you like your hair cut. If you believe we hold health
-     information about you, contact us and we will delete it. ${LAWYER}</p>
+     instructed to record only how you like your hair cut. That applies equally to notes
+     sent with a request while signed in, which reach a server rather than staying on your
+     phone. If you believe we hold health information about you, contact us and we will
+     delete it. ${LAWYER}</p>
 
   ${H('Text messages and email')}
   <p>We only text you if you asked us to. Message and data rates may apply. Reply STOP to
@@ -4421,8 +4914,13 @@ route('/privacy', () => legalShell('Privacy Policy', 'Legal', `
   ${H('How long we keep information, and how it is protected')}
   <p>Appointment records are kept for three years after your last visit, then deleted.
      Shop records held in this site's admin area are encrypted at rest with a passphrase
-     known only to the owner and the shop manager. ${LAWYER} Confirm the retention period
-     against Washington record keeping and tax rules.</p>
+     known only to the owner and the shop manager, and are not on any server.</p>
+  <p>Requests you send while signed in are kept on the server until the shop copies them
+     into its book, and are deleted from the server within 90 days of that. Sign-in accounts
+     are kept until you delete them or ask us to. The connection is encrypted end to end,
+     and the cookie that keeps you signed in cannot be read by any script on the page.</p>
+  <p>${LAWYER} Confirm the retention periods against Washington record keeping and tax
+     rules, and confirm the processor contracts with Cloudflare and Google are in place.</p>
 
   ${H('Changes')}
   <p>If this policy changes we update the version at the top of this page and, for material
@@ -4449,16 +4947,26 @@ route('/terms', () => legalShell('Terms of Service', 'Legal', `
      displayed in the shop on the day of your visit.</p>
 
   ${H('Payment')}
-  <p>Payment is taken in the shop. This website does not process payments, take deposits,
-     or collect card details at any point.</p>
+  <p>Payment for a haircut is taken in the shop, or through GlossGenius if you book there.
+     This website does not process customer payments, take deposits, or collect card
+     details at any point. There is no cart and no checkout for services.</p>
 
   ${H('Results and satisfaction')}
   <p>If you are not happy with your cut, tell us before you leave and we will put it right
      at no charge. Hair, skin and beard results vary from person to person.</p>
 
   ${H('Your account on this site')}
-  <p>Your account exists only in the browser you created it in. There is no password reset,
-     because there is no server holding your account. Keep your passphrase somewhere safe.</p>
+  <p>There are two kinds, and they behave differently.</p>
+  <p>A <b>passphrase account</b> exists only in the browser you created it in. There is no
+     password reset, because there is no server holding it. Keep your passphrase somewhere
+     safe: if it is lost the account cannot be recovered by anyone, including us.</p>
+  <p>A <b>Google sign-in</b> works on any device you sign in from. Google handles the
+     password, so there is nothing for us to reset and nothing for us to lose. You can sign
+     out anywhere and delete the account whenever you like; deleting it also deletes the
+     requests you sent with it. See the <a href="#/privacy" data-nav>Privacy Policy</a> for
+     exactly what is stored.</p>
+  <p>A request you send through this site is a request, not a confirmed appointment. It is
+     an appointment when Katherine tells you it is.</p>
 
   ${H('Acceptable use')}
   <p>Do not attempt to break into the shop admin area, interfere with the site, or use it
@@ -4590,6 +5098,10 @@ function boot() {
   // Restore a customer session marker. The passphrase is not kept, so the
   // customer signs in again after a reload. That is the intended trade.
   render();
+
+  // The server session, if there is a server. Painted after the first render so a
+  // static host with no /api routes costs nothing but one failed fetch.
+  cloudRefresh().then(me => { if (me) render(); });
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

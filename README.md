@@ -103,52 +103,128 @@ Nothing gets written until you click the import button.
 Same tab, the button marked "Full backup as JSON". Do it once setup is done, then
 every few weeks. It puts everything back exactly as it was.
 
+### 6. Turn on the website inbox
+
+Only if the site is on Cloudflare with the steps under "Putting it online" done.
+
+Open the Requests tab and paste the pull code. That is what lets her iPad ask the
+website whether anyone has asked for a time. Press "Check for requests" and she
+sees them; "Add to the book" copies one across as *requested*, not confirmed, and
+she rings them back the way she always has.
+
+The Billing tab is the other half: $100 once, $50 a month, cancel any month. Set it
+up there and the card details are entered on Stripe's pages, never on this site. If
+a payment ever fails the tab says so and nothing else happens — the website does not
+go dark over a late invoice, and it is worth telling her that in those words.
+
 ---
 
 ## Putting it online
 
-The repo already has a GitHub Pages workflow (`.github/workflows/static.yml`). Every
-push to `main` publishes the site. Nothing else to set up, and no build step to
-configure.
+**Cloudflare Pages.** Not GitHub Pages, and not because of a preference. Two things
+rule it out now:
 
-Two things about Pages worth knowing, because they are not obvious.
+- The sign-in and billing routes under `functions/` are server code. GitHub Pages
+  serves files and nothing else, so on Pages they simply would not exist.
+- GitHub's terms bar "your online business, e-commerce site, or any other website
+  that is primarily directed at either facilitating commercial transactions." The
+  earlier version of this file argued the site was a brochure and took no money.
+  It has a payment button now, so that argument is spent.
 
-**The header files do nothing there.** `_headers`, `_redirects` and `vercel.json` are
-conventions belonging to Cloudflare and Vercel. GitHub Pages ignores all three and
-serves its own headers instead. The redirects were never load-bearing, since the site
-routes with `#/privacy` style links that work anywhere. The security policy did
-matter, so it now travels inside `index.html` as a `<meta http-equiv>` tag and applies
-on any host. One piece cannot survive that move: `frame-ancestors`, which browsers
-ignore in a meta tag. On Cloudflare the `_headers` file still adds it back.
+Avoid Vercel's free Hobby plan: it bans commercial use outright and they suspend
+accounts over it. Vercel Pro is fine and `vercel.json` is already written for it,
+but the functions are written for Cloudflare.
 
-**Read GitHub's rules before you rely on it.** GitHub Pages is not allowed to run "your
-online business, e-commerce site, or any other website that is primarily directed at
-either facilitating commercial transactions." This site takes no money. There is no
-cart, no checkout, no card field, and booking hands off to GlossGenius. That reads as a
-shop's brochure page rather than a store, so it should be fine. It is still a judgment
-call, and if it ever grows a payment button that judgment changes.
-
-GitHub also says not to use Pages for sending passwords. Worth being precise: no
-password on this site is ever sent anywhere. The login screens hash the passphrase in
-the browser and compare it there. Nothing leaves the device, so there is no transmission
-to protect.
-
-Free Pages also needs the repository public, which means anyone can read `index.html`.
-That was already true of the design and is covered under "What this does not do" below.
-
-### If you want to move off GitHub Pages
-
-Cloudflare Pages is the alternative with no ambiguity in its terms, and it honours the
-`_headers` file so the full security policy applies.
+### 1. Create the project
 
 1. Sign in at <https://dash.cloudflare.com> and open Workers & Pages
 2. Create, then Pages, then Connect to Git, and pick this repository
-3. Framework preset: None. Build command: leave empty. Output directory: /
+3. Framework preset: None. Build command: leave empty. Output directory: `/`
 4. Save and Deploy
 
-Avoid Vercel's free Hobby plan. It bans commercial use outright, with no carve out for
-brochure sites, and they suspend accounts over it. Vercel Pro is fine, and `vercel.json`
-is already written for it.
+### 2. Create the database
+
+```bash
+npx wrangler d1 create ol-barbershop
+```
+
+Copy the `database_id` it prints into `wrangler.toml`, then create the tables:
+
+```bash
+npx wrangler d1 execute ol-barbershop --remote --file sql/server.sql
+```
+
+This database holds customer sign-ins, the requests they send, and the state of the
+shop's own subscription. It does not hold Katherine's book. That stays encrypted on
+her iPad, which is the point.
+
+### 3. Set the secrets
+
+In the Pages project, Settings, then Environment variables. None of these belong in
+the repository.
+
+| Name | What it is |
+|---|---|
+| `GOOGLE_CLIENT_ID` | OAuth client id, from step 4 |
+| `SESSION_SECRET` | A long random string. Changing it signs every customer out. |
+| `ADMIN_PULL_TOKEN` | A long random string. Katherine pastes this into admin once. |
+| `STRIPE_SECRET_KEY` | `sk_live_…` (`sk_test_…` while you are testing) |
+| `STRIPE_WEBHOOK_SECRET` | `whsec_…`, from step 5 |
+| `STRIPE_PRICE_MONTHLY` | The $50/month recurring price id |
+| `STRIPE_PRICE_SETUP` | The $100 one-time price id |
+
+Generate the two random ones with `openssl rand -base64 32`.
+
+### 4. Google sign-in
+
+At <https://console.cloud.google.com/apis/credentials>, create an OAuth client id of
+type Web application. Add the site's address as an authorised JavaScript origin —
+the `*.pages.dev` one and the real domain if there is one. Paste the client id into
+`GOOGLE_CLIENT_ID`.
+
+Sign in with Apple is not here. It needs a paid Apple Developer membership and a
+client secret that is a JWT signed with an Apple private key, so it cannot ship
+without that account. `lib/idtoken.js` is written as a table of providers so adding
+it later is one entry plus the key, not a rewrite.
+
+### 5. Stripe
+
+Two prices in the Stripe dashboard: a $50/month recurring one and a $100 one-time
+one. Then a webhook endpoint pointing at `https://your-site/api/billing/webhook`,
+subscribed to `checkout.session.completed`, `customer.subscription.*`,
+`invoice.paid` and `invoice.payment_failed`. Copy its signing secret into
+`STRIPE_WEBHOOK_SECRET`.
+
+This bills the shop for the website. It has nothing to do with haircuts —
+GlossGenius already takes those payments, and a second card processor would split
+Katherine's payouts and leave her two sets of books at tax time.
+
+Card details are entered on Stripe's own pages and never touch this site, which
+keeps it at PCI SAQ A.
+
+### 6. Give Katherine the pull code
+
+Whatever you set as `ADMIN_PULL_TOKEN`. She pastes it once into admin, Requests tab.
+It is stored inside her encrypted records rather than in the page, and it is what
+lets her iPad ask the site for waiting requests. Rotating the variable revokes it.
+
+### Running it locally
+
+```bash
+npx wrangler pages dev .
+npx wrangler d1 execute ol-barbershop --local --file sql/server.sql
+```
+
+Put the same variables in a `.dev.vars` file, which is git-ignored. `python3 -m
+http.server` still works for everything except the sign-in and billing routes; the
+page detects their absence and falls back to on-device accounts.
+
+### Tests
+
+```bash
+node test/units.mjs                 # token, session and webhook verification
+SEEDED=1 node test/api.mjs          # the routes, against a running wrangler
+```
 
 ---
 
@@ -156,24 +232,31 @@ is already written for it.
 
 Worth being straight about, because it changes how the shop uses it.
 
-**Booking sends a request, not a confirmation.** With no server, choosing a time
-saves it on the customer's own phone and then hands off to a text message, an
-email, a phone call, or GlossGenius. Katherine confirms in whichever app she is
-already in and marks it confirmed in admin. The site says this plainly to
-customers rather than implying a chair is held.
+**Booking sends a request, not a confirmation.** This is now a choice rather than a
+limitation. A customer signed in with Google can send his request straight to the
+shop, and it waits in the Requests tab until Katherine pulls it in. It is still a
+request: nothing confirms a chair until she says so, because the site cannot know
+whether she is running twenty minutes behind. Everyone else still hands off to a
+text message, an email, a phone call, or GlossGenius. The site says all of this
+plainly rather than implying a chair is held.
 
 **The admin login is a gate, not a wall.** On a public web address, anyone can
 read the page source and skip a JavaScript login screen. What actually protects
 the records is that they are AES-GCM encrypted, so getting past the login screen
 yields scrambled bytes. Two further things follow from that, both deliberate:
 
-- No customer names or numbers are in the public half of the storage. The
+- No customer names or numbers are in the public half of the browser storage. The
   calendar works from time blocks that carry no identity.
-- Customer accounts live in each customer's own browser and never reach the shop.
+- Passphrase accounts live in each customer's own browser and never reach the shop.
+  Google sign-ins do reach the shop's database, and hold only a name, an email
+  address and the requests that person sent. The Privacy Policy says so plainly.
 
-**Data lives per browser.** Katherine's iPad and the shop laptop hold separate
-copies. Move data between them with backup and restore. Real sync needs a
-backend, which `sql/schema.sql` is written to support without a redesign.
+**Katherine's own data still lives per browser.** Her iPad and the shop laptop hold
+separate copies of the book. Move data between them with backup and restore. This
+did not change when the server arrived, and it was not an oversight: her client
+list is the most sensitive thing here, and keeping it encrypted on her own device
+means no outage, no breach and no unpaid invoice can put it out of her reach.
+`sql/schema.sql` is written to support syncing it later without a redesign.
 
 ---
 
@@ -181,8 +264,12 @@ backend, which `sql/schema.sql` is written to support without a redesign.
 
 - [ ] Have a Washington attorney read the Privacy Policy, Terms and Accessibility
       pages. Every clause needing a decision is marked **LAWYER REVIEW**.
-- [ ] Confirm the address, phone number and hours with Katherine. All of it came
-      from public listings and none of it is verified.
+- [ ] Confirm whether Katherine is the only barber, and what email the shop should
+      use. Everything else — name, address, phone, coordinates, hours — is confirmed
+      against the Google listing and three directories.
+- [ ] Check the Privacy Policy describes the Google sign-in accurately once the
+      Google project exists, and that processor terms with Cloudflare and Stripe
+      are accepted.
 - [ ] Set every price.
 - [ ] Decide whether a late cancellation or no-show fee applies. If it does, it
       has to appear in the Terms and before booking, not after.
@@ -193,15 +280,31 @@ backend, which `sql/schema.sql` is written to support without a redesign.
 ## Files
 
 ```
-index.html        the entire application, security policy included in its head
-.github/workflows/static.yml   publishes to GitHub Pages on every push to main
+index.html        the whole page: markup, styles, application, security policy
+functions/        the server routes, run by Cloudflare Pages
+  api/auth/       nonce, Google token exchange, session
+  api/requests.js the booking inbox, both ends of it
+  api/account.js  deleting a sign-in account and everything attached
+  api/billing/    the shop's subscription and Stripe's webhook
+lib/              shared modules the routes import
+  idtoken.js      verifies a provider's ID token; add Apple here
+  session.js      signed, stateless session cookies
+  stripe.js       Stripe over plain fetch, and webhook signatures
+  http.js         responses, base64url, constant-time compare
+test/units.mjs    token, session and webhook verification
+test/api.mjs      the routes, against a running wrangler
+sql/schema.sql    Katherine's tables, mirroring what her browser holds
+sql/server.sql    the server tables, for D1
+wrangler.toml     Cloudflare project and the D1 binding
 vercel.json       Vercel routing and security headers
 _headers          the same headers for Cloudflare Pages
 _redirects        Cloudflare Pages clean URLs
-sql/schema.sql    the database schema, for a future backend
 PRODUCT.md        who this is for and what it is trying to be
 DESIGN.md         colour, type, layout and motion decisions
 ```
+
+The security policy is written out three times, in `index.html`, `_headers` and
+`vercel.json`. They have to stay identical. Change one and change all three.
 
 ## Compliance notes for whoever maintains this
 

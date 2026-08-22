@@ -65,10 +65,15 @@ Reject these on sight:
 2. **Furniture, not nostalgia.** The visual language comes from the materials actually in
    the room: oak panelling, burgundy leather upholstery, brass fittings. Real materials,
    made well. Not a themed restaurant.
-3. **Never claim a booking the shop has not confirmed.** With no server, a request is a
-   request. Saying otherwise is both dishonest and exposure under Washington's Consumer
-   Protection Act.
+3. **Never claim a booking the shop has not confirmed.** A request is a request. This
+   held when there was no server and it still holds now that there is one: the site
+   cannot know whether Katherine is running twenty minutes behind, so only she can turn
+   a request into an appointment. Saying otherwise is both dishonest and exposure under
+   Washington's Consumer Protection Act.
 4. **Katherine must be able to undo anything.** She is the only person who can fix her own
    data at 6pm on a Friday. Full export and restore is a design requirement, not a feature.
+   Her book stays encrypted on her own device for the same reason: no outage, no breach
+   and no unpaid invoice can put her client list out of her reach. Only what has to cross
+   a device boundary — customer sign-ins and the requests they send — lives on a server.
 5. **The barber pole is the one indulgence.** One object, rendered properly, carrying all
    the shop's personality so the rest of the page can stay quiet.
