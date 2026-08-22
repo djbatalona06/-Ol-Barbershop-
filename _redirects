@@ -3,6 +3,7 @@
 /services       /index.html   200
 /account        /index.html   200
 /admin          /index.html   200
+/billing        /index.html   200
 /privacy        /index.html   200
 /terms          /index.html   200
 /accessibility  /index.html   200
