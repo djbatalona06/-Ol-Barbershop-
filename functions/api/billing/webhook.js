@@ -5,7 +5,7 @@
  * is a promise made on card 11 of the handover notes, and a website that goes dark
  * over a late invoice is both a bad way to treat a five-year client and an
  * unfair-practice complaint waiting to happen. */
-import { json, fail } from '../../../lib/http.js';
+import { json, fail, missingDb } from '../../../lib/http.js';
 import { verifyWebhook } from '../../../lib/stripe.js';
 
 const WATCHED = new Set([
@@ -19,6 +19,8 @@ const WATCHED = new Set([
 
 export async function onRequestPost({ request, env }) {
   if (!env.STRIPE_WEBHOOK_SECRET) return fail(503, 'Billing is not set up.');
+  const noDb = missingDb(env);
+  if (noDb) return noDb;
 
   // The raw text, byte for byte. Re-serialising a parsed object breaks the signature.
   const raw = await request.text();

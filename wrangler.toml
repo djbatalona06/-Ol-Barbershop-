@@ -3,11 +3,23 @@ name = "ol-barbershop"
 pages_build_output_dir = "."
 compatibility_date = "2026-08-01"
 
+# This block is what `wrangler d1 execute ol-barbershop` resolves against. It is
+# NOT how the binding reaches the running Worker, and assuming otherwise costs an
+# afternoon:
+#
+#   Locally, `wrangler pages dev` ignores this block. Pass --d1 DB=ol-barbershop
+#   or env.DB is undefined and every route touching it returns 500.
+#
+#   In production, a Pages project takes its D1 binding from the dashboard,
+#   Settings > Bindings. Editing this file does not create it.
+#
+# database_id is kept equal to database_name so the local file `d1 execute` writes
+# to is the same one --d1 DB=ol-barbershop gives the Worker. Different values mean
+# two separate SQLite files and a schema that appears to apply to nothing.
 [[d1_databases]]
 binding = "DB"
 database_name = "ol-barbershop"
-# Replace with the id printed by: wrangler d1 create ol-barbershop
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "ol-barbershop"
 
 # Secrets are never listed here. Set them once with `wrangler pages secret put NAME`,
 # or in the Pages dashboard under Settings > Environment variables:

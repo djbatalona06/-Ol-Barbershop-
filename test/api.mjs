@@ -168,6 +168,22 @@ console.log('\nbilling webhook');
      state.billing && state.billing.status === 'past_due', JSON.stringify(state));
 }
 
+/* The binding is easy to lose: `wrangler pages dev` ignores [[d1_databases]] and a
+   Pages project takes it from the dashboard. When it is missing the routes must say
+   so, not throw an undefined-property error that names nothing useful. This asserts
+   the routes are reachable AND that a reachable route actually has its database —
+   a 503 here means the worker started without --d1. */
+console.log('\nthe database binding');
+{
+  const res = await call('/api/billing/checkout', { headers: { authorization: `Bearer ${PULL}` } });
+  ok('the D1 binding is actually wired up (503 = started without --d1)',
+     res.status !== 503, `(got ${res.status}: run wrangler pages dev with --d1 DB=ol-barbershop)`);
+
+  const body = await res.json().catch(() => ({}));
+  ok('the route answers with data rather than an undefined-property crash',
+     res.ok && body.billing !== undefined, JSON.stringify(body));
+}
+
 console.log('\nthe site itself');
 {
   const res = await call('/');

@@ -1,0 +1,68 @@
+# Runs the tests. There is no build step to run, by design: index.html ships as
+# written, and the only dependency anywhere is wrangler, which exists to run the
+# functions locally and never reaches the browser.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Token verification, session signing and webhook signatures. Pure Node,
+      # nothing to install: the provider's key endpoint is stubbed so the failure
+      # cases can actually be produced.
+      - name: Verify tokens, sessions and webhook signatures
+        run: node test/units.mjs
+
+      # The routes, against the real worker runtime. Wrangler is pinned rather
+      # than kept in a package.json: this repo has no runtime dependencies and
+      # should not grow a lockfile to gain one dev tool.
+      - name: Start the worker
+        run: |
+          cp .github/workflows/ci.dev.vars .dev.vars
+          # --d1 is required: pages dev does not read [[d1_databases]] from
+          # wrangler.toml, and without the flag env.DB is undefined and every
+          # route that touches it returns 500.
+          npx --yes wrangler@4.125.0 pages dev . --port 8788 \
+            --d1 DB=ol-barbershop --persist-to .wrangler \
+            > wrangler.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:8788/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null http://localhost:8788/ || { cat wrangler.log; exit 1; }
+
+      - name: Create the tables
+        run: |
+          npx --yes wrangler@4.125.0 d1 execute ol-barbershop \
+            --local --persist-to .wrangler --file sql/server.sql
+
+      # A sign-in that the routes will accept has to exist before a request can
+      # reference it. In life /api/auth/google writes this row.
+      - name: Seed one signed-in customer
+        run: |
+          npx --yes wrangler@4.125.0 d1 execute ol-barbershop --local --persist-to .wrangler \
+            --command "INSERT INTO customer_identities (id,provider,subject,email,email_verified,display_name,created_at,last_seen_at) VALUES ('google:test-subject','google','test-subject','testcut@example.com',1,'Test Customer','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')"
+
+      - name: Exercise the routes
+        env:
+          SEEDED: '1'
+        run: node test/api.mjs
+
+      - name: Show the worker log if anything failed
+        if: failure()
+        run: cat wrangler.log

@@ -4,7 +4,7 @@
  * signature against Google's published keys and then checking that the token was
  * issued for this application and this sign-in attempt — none of which is worth
  * anything if the code doing the checking is code the visitor controls. */
-import { json, fail, readJson } from '../../../lib/http.js';
+import { json, fail, readJson, missingDb } from '../../../lib/http.js';
 import { verifyIdToken } from '../../../lib/idtoken.js';
 import { mintSession, readSession, cookieValue, setCookie, clearCookie } from '../../../lib/session.js';
 import { NONCE_COOKIE } from './nonce.js';
@@ -13,6 +13,8 @@ export async function onRequestPost({ request, env }) {
   if (!env.SESSION_SECRET || !env.GOOGLE_CLIENT_ID) {
     return fail(503, 'Signing in with Google is not set up on this site yet.');
   }
+  const noDb = missingDb(env);
+  if (noDb) return noDb;
 
   let body;
   try { body = await readJson(request); }

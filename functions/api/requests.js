@@ -7,7 +7,7 @@
  * Protection Act.
  *
  * Her vault stays the system of record. This table is an inbox she empties. */
-import { json, fail, readJson, safeEqual } from '../../lib/http.js';
+import { json, fail, readJson, safeEqual, missingDb } from '../../lib/http.js';
 import { currentCustomer } from '../../lib/session.js';
 
 const MAX_NOTE = 500;
@@ -18,6 +18,9 @@ const MAX_NOTE = 500;
 const clean = (v, max) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, max);
 
 export async function onRequestPost({ request, env }) {
+  const noDb = missingDb(env);
+  if (noDb) return noDb;
+
   const claims = await currentCustomer(request, env);
   if (!claims) return fail(401, 'Please sign in before sending a request.');
 
@@ -74,6 +77,9 @@ export async function onRequestPost({ request, env }) {
  * DJ sets a pull token once; it lives inside her encrypted vault and travels as a
  * bearer header. Rotating the env var revokes it. */
 export async function onRequestGet({ request, env }) {
+  const noDb = missingDb(env);
+  if (noDb) return noDb;
+
   const offered = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
 
   // Katherine, with the pull token: everything still waiting.
@@ -101,6 +107,9 @@ export async function onRequestGet({ request, env }) {
 
 /* Mark requests pulled, so the same one is not imported into the book twice. */
 export async function onRequestPatch({ request, env }) {
+  const noDb = missingDb(env);
+  if (noDb) return noDb;
+
   const offered = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
   if (!env.ADMIN_PULL_TOKEN || !offered || !safeEqual(offered, env.ADMIN_PULL_TOKEN)) {
     return fail(401, 'Not authorised.');

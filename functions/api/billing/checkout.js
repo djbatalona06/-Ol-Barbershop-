@@ -10,10 +10,13 @@
  * This bills the shop for the website. It has nothing to do with haircuts —
  * GlossGenius already takes those payments, and a second merchant account would
  * split her payouts and give her two sets of books to reconcile. */
-import { json, fail, safeEqual } from '../../../lib/http.js';
+import { json, fail, safeEqual, missingDb } from '../../../lib/http.js';
 import { stripe } from '../../../lib/stripe.js';
 
 export async function onRequestPost({ request, env }) {
+  const noDb = missingDb(env);
+  if (noDb) return noDb;
+
   const offered = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
   if (!env.ADMIN_PULL_TOKEN || !offered || !safeEqual(offered, env.ADMIN_PULL_TOKEN)) {
     return fail(401, 'Not authorised.');
@@ -50,6 +53,9 @@ export async function onRequestPost({ request, env }) {
 
 /** What the billing page shows: plan state, read from what the webhook recorded. */
 export async function onRequestGet({ request, env }) {
+  const noDb = missingDb(env);
+  if (noDb) return noDb;
+
   const offered = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
   if (!env.ADMIN_PULL_TOKEN || !offered || !safeEqual(offered, env.ADMIN_PULL_TOKEN)) {
     return fail(401, 'Not authorised.');

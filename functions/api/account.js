@@ -5,10 +5,13 @@
  * delete and no tombstone. A request already copied into Katherine's book stays in
  * her book — that is her business record, kept for the three years the policy
  * states, and it lives on her device rather than here. */
-import { json, fail } from '../../lib/http.js';
+import { json, fail, missingDb } from '../../lib/http.js';
 import { currentCustomer, clearCookie } from '../../lib/session.js';
 
 export async function onRequestDelete({ request, env }) {
+  const noDb = missingDb(env);
+  if (noDb) return noDb;
+
   const claims = await currentCustomer(request, env);
   if (!claims) return fail(401, 'Please sign in first.');
 

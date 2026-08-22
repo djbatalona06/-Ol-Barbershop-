@@ -146,13 +146,19 @@ but the functions are written for Cloudflare.
 
 ```bash
 npx wrangler d1 create ol-barbershop
-```
-
-Copy the `database_id` it prints into `wrangler.toml`, then create the tables:
-
-```bash
 npx wrangler d1 execute ol-barbershop --remote --file sql/server.sql
 ```
+
+Then **bind it in the dashboard**, which is the step that actually matters and the
+one that looks optional: Pages project, Settings, Bindings, add a D1 binding with
+variable name `DB` pointing at `ol-barbershop`. Do it for Production and Preview
+both.
+
+Editing `wrangler.toml` does not do this. A Pages project takes its binding from
+the dashboard, and `wrangler pages dev` ignores the `[[d1_databases]]` block
+entirely. Miss it and `env.DB` is undefined; the routes now answer "The booking
+service is not finished being set up" rather than throwing, so if you see that
+message this is why.
 
 This database holds customer sign-ins, the requests they send, and the state of the
 shop's own subscription. It does not hold Katherine's book. That stays encrypted on
@@ -211,13 +217,20 @@ lets her iPad ask the site for waiting requests. Rotating the variable revokes i
 ### Running it locally
 
 ```bash
-npx wrangler pages dev .
+npx wrangler pages dev . --d1 DB=ol-barbershop
 npx wrangler d1 execute ol-barbershop --local --file sql/server.sql
 ```
 
-Put the same variables in a `.dev.vars` file, which is git-ignored. `python3 -m
-http.server` still works for everything except the sign-in and billing routes; the
-page detects their absence and falls back to on-device accounts.
+`--d1` is not optional, for the reason above. It also has to name the same value as
+`database_id` in `wrangler.toml`, which is why that is set to `ol-barbershop`
+rather than a UUID: the two commands otherwise write to two different local SQLite
+files, the schema appears to apply, and every query fails with `no such table`.
+
+Put the same variables in a `.dev.vars` file, which is git-ignored; the CI copy in
+`.github/workflows/ci.dev.vars` shows the shape and contains only placeholders.
+
+`python3 -m http.server` still works for everything except the sign-in and billing
+routes; the page detects their absence and falls back to on-device accounts.
 
 ### Tests
 
@@ -225,6 +238,9 @@ page detects their absence and falls back to on-device accounts.
 node test/units.mjs                 # token, session and webhook verification
 SEEDED=1 node test/api.mjs          # the routes, against a running wrangler
 ```
+
+Both run on every push and pull request from `.github/workflows/test.yml`, which
+starts a real worker and a real local database rather than mocking either.
 
 ---
 
@@ -280,6 +296,7 @@ means no outage, no breach and no unpaid invoice can put it out of her reach.
 ## Files
 
 ```
+.github/workflows/test.yml   runs both suites on every push and pull request
 index.html        the whole page: markup, styles, application, security policy
 functions/        the server routes, run by Cloudflare Pages
   api/auth/       nonce, Google token exchange, session
