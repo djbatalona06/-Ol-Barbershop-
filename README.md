@@ -75,6 +75,20 @@ here is exactly what customers can book, so read it twice.
 For one day off, a holiday, or an early close, use "Days off and changes" further
 down the page instead of editing the weekly hours.
 
+Two other things need a straight answer from Katherine while you have her:
+
+- **Is she the only barber?** The roster seeds her alone. At least one directory
+  lists the shop as having several independent contractors. If that's right, add
+  them in the Barbers tab — each one gets their own hours and their own calendar.
+- **What email should the shop use?** `hello@theolbarbershop.com` in the file is a
+  placeholder nobody registered. Booking requests fall back to it, so mail sent
+  there today goes nowhere. Either register it or use hers.
+
+The name, address, phone, coordinates and hours are already confirmed against the
+Google listing and don't need checking. The map links, the page and the structured
+data all read from those same constants, so there's only one place to correct if
+anything ever moves.
+
 ### 4. Move her clients over
 
 In GlossGenius, export the client list as a spreadsheet file. The button says CSV.

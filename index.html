@@ -448,6 +448,16 @@ textarea.input { min-height: 6rem; resize: vertical; line-height: 1.55; }
 }
 .slot-quick:hover { border-color: var(--claret); background: oklch(0.930 0.030 24); }
 
+/* ---- directions: two plain links, no embedded map ------------------------
+   An embedded Maps iframe would need a widened CSP and would set a Google cookie
+   on a page that currently sets none. A link costs nothing and works offline in
+   the sense that matters: it hands off to the maps app he already uses. */
+.directions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-4); }
+.directions .btn { flex: 1 1 auto; }
+.directions-note {
+  margin: var(--s-2) 0 0; font-size: var(--t-xs); color: var(--ink-faint); line-height: 1.5;
+}
+
 /* ---- the wall menu: services as a price list, not cards ------------------ */
 .menu-group + .menu-group { margin-top: var(--s-6); }
 .menu-group h3 {
@@ -1295,7 +1305,7 @@ function loadPublic() {
   publicDB = db;
   return db;
 }
-const savePublic = () => lsSet(K_PUBLIC, publicDB);
+const savePublic = () => { lsSet(K_PUBLIC, publicDB); refreshJsonLd(); };
 
 /* ---------- vaultDB: encrypted at rest ------------------------------------ */
 const VAULT_TABLES = ['clients', 'appointments', 'pipeline_stages', 'pipeline_cards',
@@ -1358,6 +1368,13 @@ const SHOP = {
   founded: 2017,
   booking_url: 'https://theolbarbershopkat.glossgenius.com/',
   email: 'hello@theolbarbershop.com',
+  /* Confirmed against the shop's Google Business Profile. The CID is the listing's
+     own id (hex 0x66719c940f9e078a in the Maps URL); linking by it lands on this
+     exact shop every time, where a name-and-address search can drift to a
+     neighbouring barber. Coordinates come from the same URL. */
+  lat: 47.8961046,
+  lng: -122.2544818,
+  google_cid: '7381853423968061322',
   lead_time_min: 120,       // no booking inside two hours
   cancel_window_hr: 24,
   horizon_days: 60          // how far out the calendar opens
@@ -2023,6 +2040,97 @@ function hoursList() {
     return { day: DOW[wd], txt: r ? `${hm12(r.start_time)} to ${hm12(r.end_time)}` : 'Closed', closed: !r };
   }).sort((a, b) => DOW.indexOf(a.day) - DOW.indexOf(b.day));
 }
+/* ---------- structured data ----------------------------------------------
+   One LocalBusiness record, built from the same constants the page renders from
+   rather than retyped, so the markup and the page can never disagree. Hours read
+   from schedule_rules, so when Katherine changes her hours in admin the markup
+   moves with them.
+
+   Two deliberate omissions:
+   - priceRange and makesOffer cover confirmed services only. Every seeded price
+     carries needs_review = 1, so today this emits neither. Publishing a guessed
+     price in markup would be the same deceptive practice as printing it on the
+     page, just harder to notice.
+   - aggregateRating is never emitted. Self-serving review markup is against
+     Google's guidelines, and the rating moves anyway.
+   ------------------------------------------------------------------------ */
+function buildJsonLd() {
+  const web = location.protocol === 'http:' || location.protocol === 'https:';
+  const base = web ? location.origin + '/' : '';
+
+  const hours = publicDB.schedule_rules
+    .filter(r => r.active)
+    .sort((a, b) => Number(a.weekday) - Number(b.weekday))
+    .map(r => ({
+      '@type': 'OpeningHoursSpecification',
+      dayOfWeek: `https://schema.org/${DOW[Number(r.weekday)]}`,
+      opens: r.start_time,
+      closes: r.end_time
+    }));
+
+  const confirmed = publicDB.services.filter(s => s.active && !Number(s.needs_review));
+  const prices = confirmed.map(s => Number(s.price_cents)).filter(c => c > 0);
+
+  const ld = {
+    '@context': 'https://schema.org',
+    '@type': 'HairSalon',
+    name: SHOP.name,
+    description: 'A modern day barber shop for the everyday man. Classic cuts finished '
+               + 'with a straight razor neck shave, priced à la carte.',
+    telephone: `+1${SHOP.phone}`,
+    address: {
+      '@type': 'PostalAddress',
+      streetAddress: SHOP.street,
+      addressLocality: SHOP.city,
+      addressRegion: SHOP.state,
+      postalCode: SHOP.zip,
+      addressCountry: 'US'
+    },
+    geo: { '@type': 'GeoCoordinates', latitude: SHOP.lat, longitude: SHOP.lng },
+    hasMap: googleMapsUrl(),
+    foundingDate: String(SHOP.founded),
+    currenciesAccepted: 'USD',
+    paymentAccepted: 'Cash, Credit Card, Debit Card',
+    publicAccess: true,
+    openingHoursSpecification: hours,
+    sameAs: [SHOP.booking_url]
+  };
+
+  if (base) { ld['@id'] = base + '#shop'; ld.url = base; }
+
+  if (prices.length) {
+    const lo = Math.min(...prices) / 100, hi = Math.max(...prices) / 100;
+    ld.priceRange = lo === hi ? `$${lo}` : `$${lo}–$${hi}`;
+    ld.makesOffer = confirmed.filter(s => Number(s.price_cents) > 0).map(s => ({
+      '@type': 'Offer',
+      priceCurrency: 'USD',
+      price: (Number(s.price_cents) / 100).toFixed(2),
+      itemOffered: { '@type': 'Service', name: s.name, ...(s.description ? { description: s.description } : {}) }
+    }));
+  }
+  return ld;
+}
+
+/** Write the record into head, replacing whatever was there. Idempotent. */
+function refreshJsonLd() {
+  let tag = document.getElementById('shopJsonLd');
+  if (!tag) {
+    tag = document.createElement('script');
+    tag.type = 'application/ld+json';
+    tag.id = 'shopJsonLd';
+    document.head.appendChild(tag);
+  }
+  // textContent, never innerHTML: this never parses as markup, so nothing in the
+  // service names can break out of the script element.
+  tag.textContent = JSON.stringify(buildJsonLd(), null, 2);
+}
+
+/* Directions without a third party in the page. Both are plain links: no iframe,
+   no Maps JS API, no key, no cost, and no cookie set on a page that sets none. */
+const googleMapsUrl = () => `https://maps.google.com/?cid=${SHOP.google_cid}`;
+const appleMapsUrl = () =>
+  `https://maps.apple.com/?ll=${SHOP.lat},${SHOP.lng}&q=${encodeURIComponent(SHOP.name)}`;
+
 const activeServices = () => publicDB.services.filter(s => s.active && !s.is_addon)
   .sort((a, b) => a.sort_order - b.sort_order);
 const defaultService = () => activeServices()[0] || publicDB.services[0];
@@ -2111,6 +2219,13 @@ route('/', view => {
           ${esc(SHOP.street)}<br>${esc(SHOP.city)}, ${esc(SHOP.state)} ${esc(SHOP.zip)}<br>
           <a href="tel:+1${esc(SHOP.phone)}" style="color:var(--claret);font-weight:600">${esc(fmtPhone(SHOP.phone))}</a>
         </address>
+        <div class="directions">
+          <a class="btn btn-ghost btn-sm" href="${esc(googleMapsUrl())}"
+             target="_blank" rel="noopener noreferrer">Directions &middot; Google</a>
+          <a class="btn btn-ghost btn-sm" href="${esc(appleMapsUrl())}"
+             target="_blank" rel="noopener noreferrer">Directions &middot; Apple</a>
+        </div>
+        <p class="directions-note">Opens your own maps app. Nothing on this page tracks you.</p>
       </div>
     </div>
   </section>
@@ -4424,6 +4539,7 @@ route('/404', () => `
    ========================================================================= */
 function boot() {
   loadPublic();
+  refreshJsonLd();
 
   $('#copyYear').textContent = String(new Date().getFullYear());
   $('#footerHours').innerHTML = hoursList()
